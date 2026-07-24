@@ -13,9 +13,15 @@ export function validateEnvironment(
   }
 }
 
+function normalizeOrigin(origin: string): string {
+  return origin.replace(/\/$/, '');
+}
+
 export function configureApp(app: INestApplication): void {
   app.setGlobalPrefix('api');
   app.enableCors({
-    origin: process.env.FRONTEND_ORIGIN ?? DEFAULT_FRONTEND_ORIGIN,
+    origin: normalizeOrigin(
+      process.env.FRONTEND_ORIGIN ?? DEFAULT_FRONTEND_ORIGIN,
+    ),
   });
 }
