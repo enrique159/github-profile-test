@@ -7,7 +7,15 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from '@nestjs/common';
-import { GitHubProfile } from './github-profile.interface';
+import {
+  getTopLanguages,
+  normalizeActivity,
+  normalizeOrganizations,
+  normalizeProfile,
+  normalizeRepositories,
+  rankRepositories,
+} from './github.mapper';
+import { GitHubProfile, GitHubSectionStatus } from './github-profile.interface';
 
 const GITHUB_API_URL = 'https://api.github.com';
 const GITHUB_API_VERSION = '2026-03-10';
@@ -16,6 +24,46 @@ const REQUEST_TIMEOUT_MS = 5_000;
 @Injectable()
 export class GitHubService {
   async getUser(username: string): Promise<GitHubProfile> {
+    const encodedUsername = encodeURIComponent(username);
+    const profile = normalizeProfile(
+      await this.request(`/users/${encodedUsername}`, username),
+    );
+
+    const [repositoriesResult, organizationsResult, activityResult] =
+      await Promise.allSettled([
+        this.request(
+          `/users/${encodedUsername}/repos?per_page=100&sort=updated`,
+        ).then(normalizeRepositories),
+        this.request(`/users/${encodedUsername}/orgs`).then(
+          normalizeOrganizations,
+        ),
+        this.request(
+          `/users/${encodedUsername}/events/public?per_page=30`,
+        ).then(normalizeActivity),
+      ]);
+
+    const repositoryCandidates =
+      repositoriesResult.status === 'fulfilled' ? repositoriesResult.value : [];
+
+    return {
+      ...profile,
+      repositories: rankRepositories(repositoryCandidates),
+      topLanguages: getTopLanguages(repositoryCandidates),
+      organizations:
+        organizationsResult.status === 'fulfilled'
+          ? organizationsResult.value
+          : [],
+      activity:
+        activityResult.status === 'fulfilled' ? activityResult.value : [],
+      sections: {
+        repositories: this.sectionStatus(repositoriesResult),
+        organizations: this.sectionStatus(organizationsResult),
+        activity: this.sectionStatus(activityResult),
+      },
+    };
+  }
+
+  private async request(path: string, username?: string): Promise<unknown> {
     const abortController = new AbortController();
     const timeout = setTimeout(
       () => abortController.abort(),
@@ -23,18 +71,19 @@ export class GitHubService {
     );
 
     try {
-      const response = await fetch(
-        `${GITHUB_API_URL}/users/${encodeURIComponent(username)}`,
-        {
-          headers: this.buildHeaders(),
-          signal: abortController.signal,
-        },
-      );
+      const response = await fetch(`${GITHUB_API_URL}${path}`, {
+        headers: this.buildHeaders(),
+        signal: abortController.signal,
+      });
 
       this.assertSuccessfulResponse(response, username);
-      const payload: unknown = await response.json();
 
-      return normalizeProfile(payload);
+      try {
+        const payload: unknown = await response.json();
+        return payload;
+      } catch {
+        throw new BadGatewayException('GitHub returned an invalid response');
+      }
     } catch (error: unknown) {
       if (error instanceof HttpException) {
         throw error;
@@ -65,8 +114,11 @@ export class GitHubService {
     return headers;
   }
 
-  private assertSuccessfulResponse(response: Response, username: string): void {
-    if (response.status === 404) {
+  private assertSuccessfulResponse(
+    response: Response,
+    username?: string,
+  ): void {
+    if (response.status === 404 && username) {
       throw new NotFoundException(`GitHub user "${username}" was not found`);
     }
 
@@ -81,83 +133,18 @@ export class GitHubService {
       throw new BadGatewayException('GitHub returned an unexpected response');
     }
   }
-}
 
-function normalizeProfile(value: unknown): GitHubProfile {
-  if (!isRecord(value)) {
-    throw new BadGatewayException('GitHub returned an invalid response');
-  }
-
-  return {
-    login: readString(value, 'login'),
-    name: readNullableString(value, 'name'),
-    avatarUrl: readHttpsUrl(value, 'avatar_url'),
-    bio: readNullableString(value, 'bio'),
-    htmlUrl: readHttpsUrl(value, 'html_url'),
-    location: readNullableString(value, 'location'),
-    company: readNullableString(value, 'company'),
-    followers: readNonNegativeNumber(value, 'followers'),
-    following: readNonNegativeNumber(value, 'following'),
-    publicRepos: readNonNegativeNumber(value, 'public_repos'),
-  };
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function readString(value: Record<string, unknown>, key: string): string {
-  const field = value[key];
-
-  if (typeof field !== 'string' || field.length === 0) {
-    throw new BadGatewayException('GitHub returned an invalid response');
-  }
-
-  return field;
-}
-
-function readNullableString(
-  value: Record<string, unknown>,
-  key: string,
-): string | null {
-  const field = value[key];
-
-  if (field === null || field === undefined) {
-    return null;
-  }
-
-  if (typeof field !== 'string') {
-    throw new BadGatewayException('GitHub returned an invalid response');
-  }
-
-  return field;
-}
-
-function readNonNegativeNumber(
-  value: Record<string, unknown>,
-  key: string,
-): number {
-  const field = value[key];
-
-  if (typeof field !== 'number' || !Number.isFinite(field) || field < 0) {
-    throw new BadGatewayException('GitHub returned an invalid response');
-  }
-
-  return field;
-}
-
-function readHttpsUrl(value: Record<string, unknown>, key: string): string {
-  const field = readString(value, key);
-
-  try {
-    const url = new URL(field);
-
-    if (url.protocol !== 'https:') {
-      throw new Error('Unexpected URL protocol');
+  private sectionStatus<T>(
+    result: PromiseSettledResult<T>,
+  ): GitHubSectionStatus {
+    if (result.status === 'fulfilled') {
+      return 'ok';
     }
 
-    return url.toString();
-  } catch {
-    throw new BadGatewayException('GitHub returned an invalid response');
+    const error: unknown = result.reason;
+
+    return error instanceof HttpException && error.getStatus() === 429
+      ? 'rateLimited'
+      : 'unavailable';
   }
 }

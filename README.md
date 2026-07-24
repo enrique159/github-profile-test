@@ -1,113 +1,91 @@
 # GitHub Profile Viewer
 
-Aplicación web para buscar cualquier usuario público de GitHub y presentar su
-perfil en una interfaz moderna, clara y responsiva.
+Aplicación web orientada a reclutamiento técnico que transforma la información
+pública de cualquier usuario de GitHub en un perfil claro, moderno y
+compartible mediante la ruta `/users/:username`.
 
-El frontend nunca consulta GitHub directamente. Las peticiones pasan por el
-backend NestJS, que valida el nombre de usuario, consume la API pública de
-GitHub, normaliza la respuesta y entrega al navegador únicamente los campos que
-la interfaz necesita.
-
-El proyecto es completamente **stateless**: no utiliza base de datos,
-persistencia, ORM, entidades ni migraciones.
+El navegador realiza una sola petición al backend. NestJS consulta GitHub,
+normaliza los datos y agrega perfil, tecnologías, repositorios destacados,
+organizaciones y actividad reciente. El proyecto es completamente **stateless**:
+no utiliza base de datos, persistencia, ORM ni caché.
 
 ## Arquitectura
 
 ```text
 Navegador
-   │
-   │ http://localhost:8080
+   │  GET /api/github/users/:username
    ▼
-Next.js (frontend)
-   │
-   │ GET /api/github/users/:username
-   ▼
-NestJS (backend)
-   │
-   │ GET https://api.github.com/users/:username
-   ▼
-GitHub REST API
+Next.js :8080 ───────────────► NestJS :3000
+                                  │
+                                  ├─ GET /users/:username
+                                  ├─ GET /users/:username/repos
+                                  ├─ GET /users/:username/orgs
+                                  └─ GET /users/:username/events/public
+                                             │
+                                             ▼
+                                      GitHub REST API
 ```
 
-## Stack
+NestJS obtiene primero el perfil obligatorio. Sólo si existe lanza en paralelo
+las otras tres consultas. Una búsqueda completa puede consumir hasta **cuatro
+solicitudes** de la cuota de GitHub.
 
-- **Frontend:** Next.js, React, TypeScript y Tailwind CSS.
+## Stack y estructura
+
+- **Frontend:** Next.js App Router, React, TypeScript y Tailwind CSS.
 - **Backend:** NestJS y TypeScript.
 - **Integración:** GitHub REST API.
-- **Entorno local:** Docker Compose y GNU Make.
-
-## Estructura del repositorio
+- **Desarrollo:** Yarn 1, Docker Compose y GNU Make.
 
 ```text
 .
 ├── backend/
-│   ├── src/
-│   │   ├── github/          # Integración, validación y normalización
-│   │   ├── health/          # Comprobación de salud
-│   │   ├── app.config.ts    # Prefijo global y CORS
-│   │   └── app.module.ts
-│   ├── test/                # Pruebas end-to-end
-│   ├── Dockerfile
-│   └── package.json
+│   ├── src/github/          # Cliente, normalización y ranking
+│   ├── src/health/          # Healthcheck
+│   └── test/                # Pruebas e2e con GitHub simulado
 ├── frontend/
-│   ├── src/app/             # App Router, layout y páginas
-│   ├── src/components/      # Búsqueda y presentación del perfil
-│   ├── src/lib/             # Cliente HTTP y contrato de respuesta
-│   ├── Dockerfile
-│   └── package.json
-├── .env.example             # Variables para Docker Compose
-├── docker-compose.yml       # Backend, frontend y red local
-├── Makefile                 # Atajos de desarrollo
+│   ├── src/app/             # Portada y /users/[username]
+│   ├── src/components/      # Búsqueda y vista enriquecida
+│   └── src/lib/             # Cliente y validación defensiva del contrato
+├── docker-compose.yml
+├── Makefile
 ├── AGENTS.md
 └── .github/agent-instructions.md
 ```
 
-Cada aplicación mantiene sus propias dependencias. El contrato entre ambas se
-expresa mediante HTTP; no se comparte ni importa código fuente entre
-`frontend/` y `backend/`.
-
-## Requisitos
-
-- Docker con el plugin Docker Compose.
-- GNU Make, recomendado para utilizar los atajos documentados.
-
-No es necesario instalar Node.js en el host si se utiliza Docker.
+Cada aplicación conserva sus propias dependencias y su `yarn.lock`. No se
+importa código fuente entre frontend y backend: el límite es el contrato HTTP.
 
 ## Configuración
 
-El proyecto funciona con valores locales predeterminados. Para personalizarlos:
+Para Docker Compose:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable | Valor predeterminado | Descripción |
+| Variable | Predeterminado | Uso |
 | --- | --- | --- |
-| `BACKEND_PORT` | `3000` | Puerto público del backend |
-| `FRONTEND_PORT` | `8080` | Puerto público del frontend |
+| `BACKEND_PORT` | `3000` | Puerto público de NestJS |
+| `FRONTEND_PORT` | `8080` | Puerto público de Next.js |
 | `FRONTEND_ORIGIN` | `http://localhost:8080` | Origen permitido por CORS |
-| `NEXT_PUBLIC_API_URL` | `http://localhost:3000` | URL de API usada por el navegador |
-| `GITHUB_TOKEN` | vacío | Token opcional, usado exclusivamente por NestJS |
+| `NEXT_PUBLIC_API_URL` | `http://localhost:3000` | API visible para el navegador |
+| `GITHUB_TOKEN` | vacío | Token utilizado únicamente por NestJS |
 
-El endpoint de GitHub utilizado permite consultar recursos públicos sin
-autenticación. Un token es opcional y sólo sirve para aumentar el límite de
-peticiones. Nunca debe colocarse en una variable `NEXT_PUBLIC_*`.
+`GITHUB_TOKEN` puede quedar vacío en desarrollo, aunque una consulta sin token
+tiene una cuota menor. En `NODE_ENV=production` es obligatorio y el backend no
+arranca si falta. Nunca se debe exponer mediante una variable
+`NEXT_PUBLIC_*`.
 
 ## Ejecución con Docker
 
-### Sólo backend
-
-Construye y levanta NestJS junto con la red del proyecto:
+Sólo backend y la red:
 
 ```bash
 make up-backend
 ```
 
-La API estará disponible en [http://localhost:3000/api](http://localhost:3000/api).
-
-### Proyecto completo
-
-Construye y levanta backend y frontend:
+Proyecto completo:
 
 ```bash
 make up
@@ -115,90 +93,121 @@ make up
 
 - Frontend: [http://localhost:8080](http://localhost:8080)
 - Backend: [http://localhost:3000/api](http://localhost:3000/api)
+- Salud: [http://localhost:3000/api/health](http://localhost:3000/api/health)
 
-El código se monta dentro de los contenedores y ambos frameworks recargan
-cambios durante el desarrollo.
+Los servicios se ejecutan en modo desarrollo con recarga y volúmenes de
+dependencias separados. No existe un contenedor de base de datos.
 
-## Comandos útiles
+Comandos disponibles:
 
 ```bash
-make help              # Lista todos los comandos
-make config            # Valida Docker Compose
-make build             # Construye ambas imágenes
-make up-backend        # Levanta sólo NestJS
-make up                # Levanta NestJS y Next.js
-make ps                # Estado de los servicios
-make logs              # Logs de todo el proyecto
-make backend-logs      # Logs de NestJS
-make frontend-logs     # Logs de Next.js
-make backend-shell     # Terminal dentro del backend
-make frontend-shell    # Terminal dentro del frontend
-make check             # Pruebas y lint principales
-make down              # Detiene contenedores y red
-make clean             # Elimina también volúmenes de dependencias
+make help
+make config
+make build
+make up-backend
+make up
+make ps
+make logs
+make backend-logs
+make frontend-logs
+make check
+make down
+make clean
 ```
 
-## Endpoints
+## API pública del proyecto
 
 ### `GET /api/health`
 
-Comprobación de salud utilizada por Docker:
-
 ```json
-{
-  "status": "ok"
-}
+{ "status": "ok" }
 ```
 
 ### `GET /api/github/users/:username`
 
-Obtiene un perfil público desde
-`GET https://api.github.com/users/{username}` y normaliza los nombres de sus
-campos.
-
-Ejemplo:
-
-```http
-GET /api/github/users/octocat
-```
-
-Respuesta:
+Entrega el perfil agregado. Ejemplo abreviado:
 
 ```json
 {
   "login": "octocat",
   "name": "The Octocat",
-  "avatarUrl": "https://avatars.githubusercontent.com/u/583231?v=4",
-  "bio": null,
+  "avatarUrl": "https://avatars.githubusercontent.com/...",
+  "bio": "GitHub mascot",
   "htmlUrl": "https://github.com/octocat",
+  "blogUrl": "https://github.blog/",
+  "twitterUsername": "github",
   "location": "San Francisco",
   "company": "@github",
+  "hireable": true,
+  "accountType": "User",
   "followers": 18000,
   "following": 9,
-  "publicRepos": 8
+  "publicRepos": 8,
+  "publicGists": 2,
+  "createdAt": "2011-01-25T18:44:36Z",
+  "updatedAt": "2026-07-20T12:00:00Z",
+  "repositories": [
+    {
+      "id": 1,
+      "name": "hello-world",
+      "fullName": "octocat/hello-world",
+      "description": "First repository",
+      "htmlUrl": "https://github.com/octocat/hello-world",
+      "homepageUrl": null,
+      "language": "TypeScript",
+      "stars": 100,
+      "forks": 20,
+      "topics": ["example"],
+      "license": "MIT",
+      "pushedAt": "2026-07-20T12:00:00Z"
+    }
+  ],
+  "topLanguages": [
+    { "name": "TypeScript", "repositoryCount": 4 }
+  ],
+  "organizations": [],
+  "activity": [],
+  "sections": {
+    "repositories": "ok",
+    "organizations": "ok",
+    "activity": "ok"
+  }
 }
 ```
 
+Los repositorios fork, archivados o deshabilitados se excluyen. Los seis
+destacados se ordenan mediante una puntuación normalizada de 55 % estrellas,
+20 % forks y 25 % recencia, con decaimiento a 365 días. Los cinco lenguajes
+principales se calculan a partir del lenguaje primario de todos los repositorios
+elegibles, sin solicitudes adicionales.
+
+Cada sección secundaria tiene estado `ok`, `rateLimited` o `unavailable`. Si
+una falla, contiene una lista vacía y el perfil sigue respondiendo `200`. Sólo
+el perfil principal determina estos errores:
+
 | Estado | Significado |
 | --- | --- |
-| `200` | Perfil encontrado |
 | `400` | Nombre de usuario inválido |
 | `404` | Usuario inexistente |
 | `429` | Límite de GitHub alcanzado |
-| `502` | GitHub devolvió una respuesta inesperada |
+| `502` | Respuesta inesperada de GitHub |
 | `503` | GitHub no está disponible |
-| `504` | La consulta a GitHub excedió el tiempo límite |
+| `504` | Tiempo de espera agotado |
 
-La respuesta completa de GitHub nunca se reenvía directamente al frontend.
+## Endpoints de GitHub consumidos
 
-## GitHub REST API
+El backend usa la GitHub REST API y nunca reenvía respuestas sin normalizar:
 
-El backend envía los encabezados recomendados por GitHub y utiliza la versión
-`2026-03-10` de la API. La consulta de un usuario público funciona sin
-autenticación.
+```text
+GET /users/{username}
+GET /users/{username}/repos?per_page=100&sort=updated
+GET /users/{username}/orgs
+GET /users/{username}/events/public?per_page=30
+```
 
-- [Endpoint “Get a user”](https://docs.github.com/en/rest/users/users#get-a-user)
-- [Versiones de GitHub REST API](https://docs.github.com/en/rest/about-the-rest-api/api-versions)
+La actividad reconoce `Push`, `PullRequest`, `Issues`, `Create`, `Watch`,
+`Fork` y `Release`; otros eventos se ignoran. Se muestran como máximo seis
+organizaciones y ocho eventos.
 
 ## Ejecución sin Docker
 
@@ -206,6 +215,7 @@ Backend:
 
 ```bash
 cd backend
+cp .env.example .env
 yarn install --frozen-lockfile
 yarn start:dev
 ```
@@ -221,21 +231,17 @@ yarn dev --port 8080
 
 ## Calidad
 
-Backend:
-
 ```bash
+cd backend
 yarn lint
 yarn test
 yarn test:e2e
 yarn build
-```
 
-Frontend:
-
-```bash
+cd ../frontend
 yarn lint
 yarn build
 ```
 
-Las pruebas automatizadas del backend simulan `fetch`; no consumen GitHub ni
-dependen de credenciales o límites externos.
+Todas las pruebas automatizadas del backend simulan `fetch`: no consumen
+GitHub, credenciales ni límites reales.

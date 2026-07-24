@@ -1,15 +1,39 @@
 # Profile/Scan frontend
 
-Next.js frontend for the GitHub profile viewer. It requests normalized public
-profile data from the NestJS backend; it does not call GitHub directly.
+Frontend Next.js orientado a explorar perfiles públicos de GitHub para
+reclutamiento técnico. La portada busca un usuario y navega a la vista
+compartible `/users/:username`.
 
-## Requirements
+## Experiencia
 
-- Node.js 20.9 or later
+La página de perfil muestra:
+
+- identidad, bio, enlaces, ubicación y antigüedad;
+- repositorios, gists, seguidores y seguidos;
+- cinco tecnologías principales;
+- seis repositorios destacados;
+- seis organizaciones públicas;
+- ocho eventos recientes compatibles.
+
+El navegador realiza una sola petición a NestJS:
+
+```text
+GET /api/github/users/:username
+```
+
+No consulta GitHub directamente. El contrato camelCase y su validación
+defensiva viven en `src/lib/github-api.ts`. Los enlaces sólo se aceptan si usan
+HTTP/HTTPS; los destinos de GitHub y avatares también validan hostname.
+
+La vista modela skeleton, contenido vacío, fallo parcial, usuario inexistente,
+límite de GitHub, backend no disponible y reintento. Un fallo secundario muestra
+un aviso dentro de su sección sin ocultar el perfil.
+
+## Requisitos y configuración
+
+- Node.js 20.9 o posterior
 - Yarn 1.22.22
-- The backend available at the URL configured below
-
-## Local setup
+- Backend disponible en la URL configurada
 
 ```bash
 cp .env.example .env.local
@@ -17,24 +41,25 @@ yarn install --frozen-lockfile
 yarn dev --port 8080
 ```
 
-Open [http://localhost:8080](http://localhost:8080).
+Abre [http://localhost:8080](http://localhost:8080).
 
-`NEXT_PUBLIC_API_URL` is the public origin of the NestJS application and
-defaults to `http://localhost:3000`. Never put credentials in a
-`NEXT_PUBLIC_*` variable.
+`NEXT_PUBLIC_API_URL` define el origen público de NestJS y usa
+`http://localhost:3000` de forma predeterminada. No se deben colocar
+credenciales en variables `NEXT_PUBLIC_*`.
 
-The frontend consumes:
+## Rutas
 
-```text
-GET /api/github/users/:username
-```
+| Ruta | Función |
+| --- | --- |
+| `/` | Portada y búsqueda |
+| `/users/:username` | Perfil enriquecido compartible |
 
-with a normalized camelCase response matching `GitHubProfile` in
-`src/lib/github-api.ts`.
-
-## Quality checks
+## Calidad
 
 ```bash
 yarn lint
 yarn build
 ```
+
+El proyecto usa App Router, React, TypeScript y Tailwind CSS sin bibliotecas
+visuales ni de estado adicionales.

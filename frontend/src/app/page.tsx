@@ -8,13 +8,13 @@ const capabilities = [
   },
   {
     number: "02",
-    title: "Impacto",
-    description: "Repositorios, seguidores y comunidad.",
+    title: "Trabajo",
+    description: "Repositorios destacados y tecnologías principales.",
   },
   {
     number: "03",
-    title: "Señales",
-    description: "Datos claros para conocer su trabajo.",
+    title: "Actividad",
+    description: "Organizaciones y señales públicas recientes.",
   },
 ];
 
@@ -63,7 +63,7 @@ export default function Home() {
           </h1>
           <p className="mt-8 max-w-2xl text-pretty text-base leading-7 text-white/58 sm:text-lg sm:leading-8">
             Escribe un usuario de GitHub y convierte sus datos públicos en una
-            vista clara, rápida y fácil de explorar.
+            vista compartible para descubrir experiencia, impacto y actividad.
           </p>
 
           <div className="mt-10 max-w-2xl">

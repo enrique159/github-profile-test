@@ -10,13 +10,14 @@ from the NestJS API; the frontend must not call the GitHub API directly. The
 backend is responsible for GitHub integration, response normalization, error
 handling, and protection of any credentials.
 
-The initial product should prioritize a polished search and profile-viewing
-experience. Useful public information may include:
+The product is oriented to technical recruiting. Search navigates to the
+shareable `/users/:username` route, which presents:
 
 - avatar, name, username, biography, and profile URL;
 - location, company, website, and social handle when available;
 - follower, following, repository, and gist counts;
-- a concise list of public repositories when the feature requires it.
+- top languages and up to six ranked public repositories;
+- up to six public organizations and eight recent supported activity events.
 
 This application is intentionally stateless. Do not add a database, ORM,
 persistence, authentication, analytics, or unrelated integrations unless the
@@ -61,6 +62,8 @@ product scope explicitly changes.
   a secret.
 - Model loading, empty, success, not-found, rate-limit, and general error states
   explicitly.
+- Request the aggregated backend contract once per profile view. Show local
+  notices for partially unavailable sections without hiding the base profile.
 - Treat GitHub data as untrusted. Render it as text and validate external links
   before using them.
 - Use semantic HTML, visible keyboard focus, accessible labels, sufficient color
@@ -116,6 +119,11 @@ connections, repositories, entities, migrations, or persistence configuration.
 - Place application endpoints under an `/api` prefix.
 - Use resource-oriented routes, for example
   `GET /api/github/users/:username`.
+- For the aggregated profile, request the mandatory GitHub profile first and
+  then request repositories, organizations, and public events in parallel.
+- Keep the public response normalized and additive. Secondary sections expose
+  `ok`, `rateLimited`, or `unavailable`; their failures return empty collections
+  with HTTP `200`.
 - Validate and safely encode usernames before making outbound requests.
 - Map upstream failures to clear HTTP responses:
   - invalid input: `400`;
@@ -124,16 +132,16 @@ connections, repositories, entities, migrations, or persistence configuration.
   - unavailable upstream service: `502` or `503`.
 - Return a consistent JSON error shape without stack traces, tokens, or
   sensitive upstream details.
-- Set explicit timeouts for outbound requests. Add caching only when requested
-  or when its behavior and invalidation are clear.
+- Set explicit timeouts for outbound requests. This project intentionally has
+  no cache.
 - Configure CORS narrowly for the known frontend origin.
 
 ### Configuration and secrets
 
 - Read configuration through environment variables and NestJS configuration
   facilities.
-- Store an optional GitHub token only in the backend, for example
-  `GITHUB_TOKEN`.
+- Store the GitHub token only in the backend as `GITHUB_TOKEN`. It may be empty
+  in development and is required at startup in production.
 - Never commit `.env` files. Maintain a safe `.env.example` when variables are
   introduced.
 - Never log authorization headers, access tokens, or full sensitive error
